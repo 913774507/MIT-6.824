@@ -144,6 +144,7 @@ func MakeNetwork() *Network {
 	rn := &Network{}
 	rn.reliable = true
 	rn.ends = map[interface{}]*ClientEnd{}
+	rn.enabled = map[interface{}]bool{}
 	rn.servers = map[interface{}]*Server{}
 	rn.connections = map[interface{}](interface{}){}
 	rn.endCh = make(chan reqMsg)
