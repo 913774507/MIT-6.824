@@ -255,7 +255,7 @@ func (cfg *config) start1(i int, applier func(int, chan ApplyMsg)) {
 	ends := make([]*labrpc.ClientEnd, cfg.n)
 	for j := 0; j < cfg.n; j++ {
 		ends[j] = cfg.net.MakeEnd(cfg.endnames[i][j])
-		cfg.net.Connect(cfg.endnames[i][j], j)
+		cfg.net.Connect(cfg.endnames[i][j], j) // 每个raft server同机建立三个rpcClient分别和三个server connect
 	}
 
 	cfg.mu.Lock()
@@ -382,7 +382,7 @@ func (cfg *config) checkOneLeader() int {
 		for i := 0; i < cfg.n; i++ {
 			if cfg.connected[i] {
 				if term, leader := cfg.rafts[i].GetState(); leader {
-					leaders[term] = append(leaders[term], i)
+					leaders[term] = append(leaders[term], i) //term : []server
 				}
 			}
 		}
