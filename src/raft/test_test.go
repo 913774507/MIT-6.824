@@ -43,7 +43,7 @@ func TestInitialElection2A(t *testing.T) {
 	time.Sleep(2 * RaftElectionTimeout)
 	term2 := cfg.checkTerms()
 	if term1 != term2 {
-		fmt.Printf("warning: term changed even though there were no failures")
+		t.Log("warning: term changed even though there were no failures")
 	}
 
 	// there should still be a leader.
@@ -60,30 +60,39 @@ func TestReElection2A(t *testing.T) {
 	cfg.begin("Test (2A): election after network failure")
 
 	leader1 := cfg.checkOneLeader()
+	t.Log("ok")
 
 	// if the leader disconnects, a new one should be elected.
+	t.Log("disconnect leader1")
 	cfg.disconnect(leader1)
 	cfg.checkOneLeader()
-
+	t.Log("66 ok leader")
 	// if the old leader rejoins, that shouldn't
 	// disturb the new leader.
+	t.Log("reconnect leader1")
 	cfg.connect(leader1)
 	leader2 := cfg.checkOneLeader()
-
+	t.Log("75 ok leader")
 	// if there's no quorum, no leader should
 	// be elected.
+	t.Log("78 disconnect")
 	cfg.disconnect(leader2)
 	cfg.disconnect((leader2 + 1) % servers)
 	time.Sleep(2 * RaftElectionTimeout)
 	cfg.checkNoLeader()
+	t.Log("82 ok")
 
 	// if a quorum arises, it should elect a leader.
+	t.Log("86 reconnect")
 	cfg.connect((leader2 + 1) % servers)
 	cfg.checkOneLeader()
+	t.Log("89 ok")
 
 	// re-join of last node shouldn't prevent leader from existing.
+	t.Log("92 reconnect")
 	cfg.connect(leader2)
 	cfg.checkOneLeader()
+	t.Log("95 ok")
 
 	cfg.end()
 }
@@ -96,28 +105,40 @@ func TestManyElections2A(t *testing.T) {
 	cfg.begin("Test (2A): multiple elections")
 
 	cfg.checkOneLeader()
+	t.Log("ok")
 
 	iters := 10
 	for ii := 1; ii < iters; ii++ {
 		// disconnect three nodes
 		i1 := rand.Int() % servers
 		i2 := rand.Int() % servers
+		for i2 == i1 {
+			i2 = (i1 + 1) % servers
+		}
 		i3 := rand.Int() % servers
+		for i3 == i1 || i3 == i2 {
+			i3 = (i2 + 1) % servers
+		}
 		cfg.disconnect(i1)
 		cfg.disconnect(i2)
 		cfg.disconnect(i3)
+		l_log := fmt.Sprintf("disconnect:S%v, S%v, S%v", i1, i2, i3)
+		t.Log(l_log)
 
 		// either the current leader should still be alive,
 		// or the remaining four should elect a new one.
 		cfg.checkOneLeader()
+		t.Log("130 ok")
 
 		cfg.connect(i1)
 		cfg.connect(i2)
 		cfg.connect(i3)
+		l_log = fmt.Sprintf("reconnect:S%v, S%v, S%v", i1, i2, i3)
+		t.Log(l_log)
 	}
 
 	cfg.checkOneLeader()
-
+	t.Log("ok")
 	cfg.end()
 }
 
@@ -494,7 +515,7 @@ func TestCount2B(t *testing.T) {
 	total1 := rpcs()
 
 	if total1 > 30 || total1 < 1 {
-		t.Fatalf("too many or few RPCs (%v) to elect initial leader\n", total1)
+		t.Fatalf("too many or few RPCs (%v) to elect initial leader", total1)
 	}
 
 	var total2 int
@@ -540,7 +561,7 @@ loop:
 					// term changed -- try again
 					continue loop
 				}
-				t.Fatalf("wrong value %v committed for index %v; expected %v\n", cmd, starti+i, cmds)
+				t.Fatalf("wrong value %v committed for index %v; expected %v", cmd, starti+i, cmds)
 			}
 		}
 
@@ -560,7 +581,7 @@ loop:
 		}
 
 		if total2-total1 > (iters+1+3)*3 {
-			t.Fatalf("too many RPCs (%v) for %v entries\n", total2-total1, iters)
+			t.Fatalf("too many RPCs (%v) for %v entries", total2-total1, iters)
 		}
 
 		success = true
@@ -579,7 +600,7 @@ loop:
 	}
 
 	if total3-total2 > 3*20 {
-		t.Fatalf("too many RPCs (%v) for 1 second of idleness\n", total3-total2)
+		t.Fatalf("too many RPCs (%v) for 1 second of idleness", total3-total2)
 	}
 
 	cfg.end()
