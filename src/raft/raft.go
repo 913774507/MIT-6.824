@@ -19,7 +19,7 @@ package raft
 
 import (
 	//	"bytes"
-	"fmt"
+
 	"math/rand"
 	"sync"
 	"sync/atomic"
@@ -30,6 +30,7 @@ import (
 )
 
 const electionDuration int64 = 1000
+const heartBeatDuration time.Duration = 100 * time.Millisecond
 
 const (
 	FOLLWER int = iota
@@ -111,17 +112,13 @@ func (rf *Raft) GetState() (int, bool) {
 	var term int
 	var isleader bool
 	// Your code here (2A).
-	rf.mu.Lock()
-	defer rf.mu.Unlock()
+	// rf.mu.Lock()
+	// defer rf.mu.Unlock()
 	if rf.dead == 1 {
 		return 0, false
 	}
 	term = rf.currentTerm
-	if rf.state == 2 {
-		isleader = true
-	} else {
-		isleader = false
-	}
+	isleader = (rf.state == 2)
 	return term, isleader
 }
 
@@ -214,10 +211,10 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	// Your code here (2A, 2B).
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
-	fmt.Printf("S%v get request vote args term:%v, candidateId:%v, lastlogindex:%v, lastlogterm:%v  currentterm:%v\n", rf.me, args.Term, args.CandidateId, args.LastLogIndex, args.LastLogTerm, rf.currentTerm)
+	DPrintf("S%v get request vote args term:%v, candidateId:%v, lastlogindex:%v, lastlogterm:%v  currentterm:%v\n", rf.me, args.Term, args.CandidateId, args.LastLogIndex, args.LastLogTerm, rf.currentTerm)
 	if args.Term < rf.currentTerm {
 		reply.Term, reply.VoteGranted = rf.currentTerm, false
-		fmt.Printf("S%v reject S%v\n", rf.me, args.CandidateId)
+		DPrintf("S%v reject S%v\n", rf.me, args.CandidateId)
 		return
 	}
 	if args.Term > rf.currentTerm { //reconnect 检查日志才能ac
@@ -227,50 +224,54 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 				reply.Term, reply.VoteGranted = rf.currentTerm, true
 				rf.votedFor = args.CandidateId
 				rf.timer.Reset(getRandomTime())
-				fmt.Printf("S%v votefor S%v\n", rf.me, args.CandidateId)
+				DPrintf("S%v votefor S%v\n", rf.me, args.CandidateId)
 				return
 			} else {
 				reply.Term, reply.VoteGranted = rf.currentTerm, false
-				fmt.Printf("S%v reject S%v, votedFor:%v\n", rf.me, args.CandidateId, rf.votedFor)
+				DPrintf("S%v reject S%v, votedFor:%v\n", rf.me, args.CandidateId, rf.votedFor)
 				return
 			}
 		} else if rf.state == LEADER {
-			rf.state = FOLLWER //每次切换到follwer, votedFor置-1
+			rf.state = FOLLWER
 			rf.currentTerm = args.Term
 			reply.Term, reply.VoteGranted = rf.currentTerm, true
 			rf.votedFor = args.CandidateId
 			rf.follwerCh <- 1
 			rf.timer.Reset(getRandomTime())
-			fmt.Printf("S%v from leader change to follwer, votefor S%v\n", rf.me, args.CandidateId)
+			DPrintf("S%v from leader change to follwer, votefor S%v\n", rf.me, args.CandidateId)
 			return
 		} else if rf.state == CANDIDATE {
-			rf.state = FOLLWER //每次切换到follwer, votedFor置-1
+			rf.state = FOLLWER
 			rf.currentTerm = args.Term
 			reply.Term, reply.VoteGranted = rf.currentTerm, true
 			rf.votedFor = args.CandidateId
 			rf.timer.Reset(getRandomTime())
-			fmt.Printf("S%v from candidate change to follwer, votefor S%v\n", rf.me, args.CandidateId)
+			DPrintf("S%v from candidate change to follwer, votefor S%v\n", rf.me, args.CandidateId)
 			return
 		}
 	}
 	rfLastLogIndex := 0
 	rfLastLogTerm := 0
-	fmt.Printf("S%v rflastlogindex:%v, rflastterm:%v\n", rf.me, rfLastLogIndex, rfLastLogTerm)
+	// DPrintf("S%v rflastlogindex:%v, rflastterm:%v\n", rf.me, rfLastLogIndex, rfLastLogTerm)
 	if len(rf.log) > 0 {
 		rfLastLogIndex = len(rf.log) - 1
 		rfLastLogTerm = rf.log[rfLastLogIndex-1].Term
 	}
-	if rf.votedFor == -1 || rf.votedFor == args.CandidateId {
-		if args.LastLogIndex >= rfLastLogIndex && args.LastLogTerm >= rfLastLogTerm {
-			reply.Term, reply.VoteGranted = rf.currentTerm, true
-			rf.votedFor = args.CandidateId
-			fmt.Printf("S%v votefor S%v, 257\n", rf.me, args.CandidateId)
-			return
-		}
+	if rf.votedFor != -1 && rf.votedFor != args.CandidateId {
+		reply.Term, reply.VoteGranted = rf.currentTerm, false
+		DPrintf("S%v reject S%v, has voted for S%v\n", rf.me, args.CandidateId, rf.votedFor)
+		return
 	}
-	reply.Term = rf.currentTerm
-	reply.VoteGranted = false
-	fmt.Printf("S%v reject S%v\n", rf.me, args.CandidateId)
+	if rfLastLogTerm > args.LastLogTerm || // the server has log with higher term
+		(rfLastLogIndex == args.LastLogTerm && rfLastLogIndex > args.LastLogIndex) { // under same term, this server has longer index
+		reply.Term, reply.VoteGranted = rf.currentTerm, false
+		DPrintf("S%v reject S%v\n", rf.me, args.CandidateId)
+		return
+	}
+	reply.Term, reply.VoteGranted = rf.currentTerm, true
+	rf.votedFor = args.CandidateId
+	rf.timer.Reset(getRandomTime())
+	DPrintf("S%v vote S%v\n", rf.me, args.CandidateId)
 }
 
 //
@@ -303,15 +304,13 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 // the struct itself.
 //
 func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, replyCh chan *RequestVoteReply) {
-	reply := &RequestVoteReply{
-		
-	}
+	reply := &RequestVoteReply{}
 	reply.Server = server
 	if !rf.peers[server].Call("Raft.RequestVote", args, reply) {
 		reply.Err = true
 	}
 	replyCh <- reply
-	fmt.Printf("S%v reply S%v to ch\n", server, args.CandidateId)
+	DPrintf("S%v reply S%v to ch\n", server, args.CandidateId)
 }
 
 type AppendEntriesArgs struct {
@@ -329,12 +328,11 @@ type AppendEntriesReply struct {
 }
 
 func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
-	rf.mu.Lock()
-	defer rf.mu.Unlock()
 	// rf.heartbeatCh <- args
-	// fmt.Printf("S%v get heatbeat from S%v\n", rf.me, args.LeaderId)
+	DPrintf("S%v get heatbeat from S%v\n", rf.me, args.LeaderId)
 	reply.Term = rf.currentTerm
 	if args.Term < rf.currentTerm || (len(rf.log) > 0 && rf.log[args.PrevLogIndex].Term != args.PrevLogTerm) {
+		DPrintf("353 S%v argsTerm<curTerm, reject, state:%v, from S%v\n", rf.me, rf.state, args.LeaderId)
 		reply.Success = false
 		return
 	}
@@ -342,37 +340,39 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		if rf.state == CANDIDATE {
 			rf.state = FOLLWER
 			rf.votedFor = -1
-			fmt.Printf("344 S%v from candidate change to follower, argsTerm:%v, curTerm:%v, from S%v\n", rf.me, args.Term, rf.currentTerm, args.LeaderId)
-			rf.timer.Reset(getRandomTime())
+			DPrintf("344 S%v from candidate change to follower, argsTerm:%v, curTerm:%v, from S%v\n", rf.me, args.Term, rf.currentTerm, args.LeaderId)
 		} else if rf.state == LEADER {
 			rf.state = FOLLWER
 			rf.votedFor = -1
 			rf.follwerCh <- 1
-			fmt.Printf("350 S%v change to follower, argsTerm:%v, curTerm:%v, from S%v\n", rf.me, args.Term, rf.currentTerm, args.LeaderId)
-			rf.timer.Reset(getRandomTime())
+			DPrintf("350 S%v change to follower, argsTerm:%v, curTerm:%v, from S%v\n", rf.me, args.Term, rf.currentTerm, args.LeaderId)
 		} else {
 			rf.votedFor = -1
-			fmt.Printf("354 S%v get heartbeat, argsTerm:%v, curTerm:%v, from S%v\n", rf.me, args.Term, rf.currentTerm, args.LeaderId)
-			rf.timer.Reset(getRandomTime())
+			DPrintf("354 S%v get heartbeat, argsTerm:%v, curTerm:%v, from S%v\n", rf.me, args.Term, rf.currentTerm, args.LeaderId)
 		}
 		rf.currentTerm = args.Term
 		reply.Success = true
+		rf.timer.Reset(getRandomTime())
 		return
-	} else if args.Term == rf.currentTerm {
+	} else {
 		if rf.state == FOLLWER {
 			rf.votedFor = -1
 			rf.timer.Reset(getRandomTime())
-			fmt.Printf("353 S%v argsTerm==curTerm, ac, from S%v\n", rf.me, args.LeaderId)
+			DPrintf("353 S%v argsTerm==curTerm, ac, from S%v\n", rf.me, args.LeaderId)
 			reply.Success = true
 		} else if rf.state == CANDIDATE {
-			fmt.Printf("353 S%v argsTerm==curTerm, ac, from candidate change to follower, from S%v\n", rf.me, args.LeaderId)
+			DPrintf("353 S%v argsTerm==curTerm, ac, from candidate change to follower, from S%v\n", rf.me, args.LeaderId)
 			rf.state = FOLLWER
 			rf.votedFor = -1
 			rf.timer.Reset(getRandomTime())
 			reply.Success = true
-		} else if rf.state == FOLLWER {
-			fmt.Printf("353 S%v argsTerm==curTerm, reject, state:%v, from S%v\n", rf.me, rf.state, args.LeaderId)
+		} else if rf.state == LEADER {
+			DPrintf("353 S%v argsTerm==curTerm, reject, state:%v, from S%v\n", rf.me, rf.state, args.LeaderId)
 			reply.Success = false
+			// rf.state = FOLLWER
+			// rf.votedFor = -1
+			// rf.follwerCh <- 1
+			// DPrintf("376 S%v change to follower, argsTerm:%v, curTerm:%v, from S%v\n", rf.me, args.Term, rf.currentTerm, args.LeaderId)
 		}
 		return
 	}
@@ -403,7 +403,36 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	isLeader := true
 
 	// Your code here (2B).
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
 
+	if rf.state != LEADER {
+		return index, term, isLeader
+	}
+	prevLogIndex := 0
+	prevLogTerm := 0
+	if len(rf.log) > 0 {
+		prevLogIndex = len(rf.log) - 1
+		prevLogTerm = rf.log[prevLogIndex].Term
+	}
+	args := &AppendEntriesArgs{
+		Term:         rf.currentTerm,
+		LeaderId:     rf.me,
+		PrevLogIndex: prevLogIndex,
+		PrevLogTerm:  prevLogTerm,
+		Entries:      []LogEntry{{Command: command, Term: rf.currentTerm}},
+		LeaderCommit: rf.commitIndex,
+	}
+	for i := range rf.peers {
+		reply := &AppendEntriesReply{}
+		if i != rf.me {
+			DPrintf("S%v replic log:%v to S%v\n", rf.me, args.Entries[0].Command, i)
+			go rf.sendAppendEntries(i, args, reply)
+		}
+	}
+	index = len(rf.log) - 1
+	term = rf.currentTerm
+	isLeader = true
 	return index, term, isLeader
 }
 
@@ -440,20 +469,24 @@ func (rf *Raft) ticker() {
 		select {
 		case <-rf.timer.C:
 		ELECTION:
-			fmt.Printf("S%v start election\n", rf.me)
+			DPrintf("S%v start election\n", rf.me)
 			//trans to candidate
 			rf.mu.Lock()
 			rf.state = CANDIDATE
 			rf.currentTerm += 1
 			rf.votedFor = rf.me
-			nowVotes := 1
+			rf.mu.Unlock()
+			// var nowVotes int32
+			// if rf.votedFor == -1 {
+			// 	nowVotes += 1
+			// }
+			var nowVotes int32 = 1
 			lastLogIndex := 0
 			lastLogTerm := 0
 			if len(rf.log) > 0 {
 				lastLogIndex = len(rf.log)
 				lastLogTerm = rf.log[lastLogIndex].Term
 			}
-			rf.mu.Unlock()
 			replyCh := make(chan *RequestVoteReply, len(rf.peers)-1)
 			args := &RequestVoteArgs{
 				Term:         rf.currentTerm,
@@ -463,7 +496,7 @@ func (rf *Raft) ticker() {
 			}
 			for i := range rf.peers {
 				if i != rf.me {
-					fmt.Printf("S%v send request to S%v\n", rf.me, i)
+					DPrintf("S%v send request to S%v\n", rf.me, i)
 					go rf.sendRequestVote(i, args, replyCh)
 				}
 			}
@@ -471,16 +504,18 @@ func (rf *Raft) ticker() {
 			for {
 				select {
 				case r := <-replyCh:
-					fmt.Printf("S%v get reply from S%v, voteGranted:%v\n", rf.me, r.Server, r.VoteGranted)
+					DPrintf("S%v get reply from S%v, voteGranted:%v\n", rf.me, r.Server, r.VoteGranted)
 					if r.Err {
 						// go rf.sendRequestVote(r.Server, args, replyCh)
 					} else if r.VoteGranted {
-						nowVotes += 1
-						fmt.Printf("463 S%v nowVotes:%v, threshold:%v\n", rf.me, nowVotes, len(rf.peers))
-						if nowVotes*2 > len(rf.peers) {
-							fmt.Printf("S%v become leader\n", rf.me)
+						atomic.AddInt32(&nowVotes, 1)
+						DPrintf("463 S%v nowVotes:%v, threshold:%v\n", rf.me, nowVotes, len(rf.peers))
+						if int(nowVotes*2) > len(rf.peers) {
+							DPrintf("S%v become leader\n", rf.me)
 							//change to leader
+							rf.mu.Lock()
 							rf.state = LEADER
+							rf.mu.Unlock()
 							rf.timer.Stop()
 							// send heartbeat
 							go rf.heartBeat()
@@ -488,15 +523,17 @@ func (rf *Raft) ticker() {
 						}
 					} else if r.Term > rf.currentTerm {
 						// step down
+						rf.mu.Lock()
 						if rf.state == CANDIDATE {
 							rf.state = FOLLWER
 							rf.votedFor = -1
 							rf.currentTerm = r.Term
 							rf.timer.Reset(getRandomTime())
 						}
+						rf.mu.Unlock()
 					}
 				case <-rf.timer.C:
-					fmt.Printf("S%v election timeout\n", rf.me)
+					DPrintf("S%v election timeout\n", rf.me)
 					rf.timer.Reset(getRandomTime())
 					goto ELECTION
 				}
@@ -507,13 +544,13 @@ func (rf *Raft) ticker() {
 
 func (rf *Raft) heartBeat() {
 	rf.heartbeat()
-	<-rf.heartBeatTimer.C
-	rf.heartBeatTimer.Reset(time.Duration(150 * time.Millisecond))
+	// <-rf.heartBeatTimer.C
+	rf.heartBeatTimer.Reset(heartBeatDuration)
 	for rf.killed() == false {
 		select {
 		case <-rf.heartBeatTimer.C:
 			rf.heartbeat()
-			rf.heartBeatTimer.Reset(time.Duration(150 * time.Millisecond))
+			rf.heartBeatTimer.Reset(heartBeatDuration)
 		case <-rf.follwerCh:
 			go rf.ticker()
 			return
@@ -535,11 +572,22 @@ func (rf *Raft) heartbeat() {
 		PrevLogTerm:  prevLogTerm,
 		LeaderCommit: rf.commitIndex,
 	}
+
 	for i := range rf.peers {
 		if i != rf.me {
-			AEReply := &AppendEntriesReply{}
-			go rf.sendAppendEntries(i, args, AEReply)
-			// fmt.Printf("S%v send AE to S%v\n", rf.me, i)
+			go func(i int) {
+				AEReply := &AppendEntriesReply{}
+				DPrintf("S%v send AE to S%v\n", rf.me, i)
+				rf.sendAppendEntries(i, args, AEReply)
+				// if AEReply.Term > rf.currentTerm {
+				// 	rf.state = FOLLWER
+				// 	rf.votedFor = -1
+				// 	rf.currentTerm = AEReply.Term
+				// 	rf.follwerCh <- 1
+				// 	rf.timer.Reset(getRandomTime())
+				// 	DPrintf("S%v AE find higher term:%v", rf.me, AEReply.Term)
+				// }
+			}(i)
 		}
 	}
 }
@@ -573,7 +621,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.applyCh = applyCh
 	rf.follwerCh = make(chan interface{}, 5)
 	rf.timer = time.NewTimer(getRandomTime())
-	rf.heartBeatTimer = time.NewTimer(time.Duration(150 * time.Millisecond))
+	rf.heartBeatTimer = time.NewTimer(heartBeatDuration)
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
 

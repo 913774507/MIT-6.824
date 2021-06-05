@@ -30,7 +30,7 @@ func TestInitialElection2A(t *testing.T) {
 
 	// is a leader elected?
 	cfg.checkOneLeader()
-
+	t.Log("32 ok")
 	// sleep a bit to avoid racing with followers learning of the
 	// election, then check that all peers agree on the term.
 	time.Sleep(50 * time.Millisecond)
@@ -59,7 +59,7 @@ func TestReElection2A(t *testing.T) {
 
 	cfg.begin("Test (2A): election after network failure")
 
-	leader1 := cfg.checkOneLeader()
+	leader1, _ := cfg.checkOneLeader()
 	t.Log("ok")
 
 	// if the leader disconnects, a new one should be elected.
@@ -71,19 +71,20 @@ func TestReElection2A(t *testing.T) {
 	// disturb the new leader.
 	t.Log("reconnect leader1")
 	cfg.connect(leader1)
-	leader2 := cfg.checkOneLeader()
+	leader2, _ := cfg.checkOneLeader()
 	t.Log("75 ok leader")
 	// if there's no quorum, no leader should
 	// be elected.
-	t.Log("78 disconnect")
+	t.Logf("78 disconnect:%v, %v", leader2, (leader2+1)%servers)
 	cfg.disconnect(leader2)
 	cfg.disconnect((leader2 + 1) % servers)
 	time.Sleep(2 * RaftElectionTimeout)
+	t.Log("82 check")
 	cfg.checkNoLeader()
 	t.Log("82 ok")
 
 	// if a quorum arises, it should elect a leader.
-	t.Log("86 reconnect")
+	t.Logf("86 reconnect:%v", (leader2 + 1) % servers)
 	cfg.connect((leader2 + 1) % servers)
 	cfg.checkOneLeader()
 	t.Log("89 ok")
@@ -127,8 +128,8 @@ func TestManyElections2A(t *testing.T) {
 
 		// either the current leader should still be alive,
 		// or the remaining four should elect a new one.
-		cfg.checkOneLeader()
-		t.Log("130 ok")
+		l, term := cfg.checkOneLeader()
+		t.Logf("130 ok, leader:%v, term:%v", l, term)
 
 		cfg.connect(i1)
 		cfg.connect(i2)
@@ -156,7 +157,9 @@ func TestBasicAgree2B(t *testing.T) {
 			t.Fatalf("some have committed before Start()")
 		}
 
+		t.Logf("commit %v start", index*100)
 		xindex := cfg.one(index*100, servers, false)
+		t.Logf("commit %v done", index*100)
 		if xindex != index {
 			t.Fatalf("got index %v but expected %v", xindex, index)
 		}
@@ -210,7 +213,7 @@ func TestFailAgree2B(t *testing.T) {
 	cfg.one(101, servers, false)
 
 	// disconnect one follower from the network.
-	leader := cfg.checkOneLeader()
+	leader, _ := cfg.checkOneLeader()
 	cfg.disconnect((leader + 1) % servers)
 
 	// the leader and remaining follower should be
@@ -244,7 +247,7 @@ func TestFailNoAgree2B(t *testing.T) {
 	cfg.one(10, servers, false)
 
 	// 3 of 5 followers disconnect
-	leader := cfg.checkOneLeader()
+	leader, _ := cfg.checkOneLeader()
 	cfg.disconnect((leader + 1) % servers)
 	cfg.disconnect((leader + 2) % servers)
 	cfg.disconnect((leader + 3) % servers)
@@ -271,7 +274,7 @@ func TestFailNoAgree2B(t *testing.T) {
 
 	// the disconnected majority may have chosen a leader from
 	// among their own ranks, forgetting index 2.
-	leader2 := cfg.checkOneLeader()
+	leader2, _ := cfg.checkOneLeader()
 	index2, _, ok2 := cfg.rafts[leader2].Start(30)
 	if ok2 == false {
 		t.Fatalf("leader2 rejected Start()")
@@ -300,7 +303,7 @@ loop:
 			time.Sleep(3 * time.Second)
 		}
 
-		leader := cfg.checkOneLeader()
+		leader, _ := cfg.checkOneLeader()
 		_, term, ok := cfg.rafts[leader].Start(1)
 		if !ok {
 			// leader moved on really quickly
@@ -396,7 +399,7 @@ func TestRejoin2B(t *testing.T) {
 	cfg.one(101, servers, true)
 
 	// leader network failure
-	leader1 := cfg.checkOneLeader()
+	leader1, _ := cfg.checkOneLeader()
 	cfg.disconnect(leader1)
 
 	// make old leader try to agree on some entries
@@ -408,7 +411,7 @@ func TestRejoin2B(t *testing.T) {
 	cfg.one(103, 2, true)
 
 	// new leader network failure
-	leader2 := cfg.checkOneLeader()
+	leader2, _ := cfg.checkOneLeader()
 	cfg.disconnect(leader2)
 
 	// old leader connected again
@@ -434,7 +437,7 @@ func TestBackup2B(t *testing.T) {
 	cfg.one(rand.Int(), servers, true)
 
 	// put leader and one follower in a partition
-	leader1 := cfg.checkOneLeader()
+	leader1, _ := cfg.checkOneLeader()
 	cfg.disconnect((leader1 + 2) % servers)
 	cfg.disconnect((leader1 + 3) % servers)
 	cfg.disconnect((leader1 + 4) % servers)
@@ -460,7 +463,7 @@ func TestBackup2B(t *testing.T) {
 	}
 
 	// now another partitioned leader and one follower
-	leader2 := cfg.checkOneLeader()
+	leader2, _ := cfg.checkOneLeader()
 	other := (leader1 + 2) % servers
 	if leader2 == other {
 		other = (leader2 + 1) % servers
@@ -510,7 +513,7 @@ func TestCount2B(t *testing.T) {
 		return
 	}
 
-	leader := cfg.checkOneLeader()
+	leader, _ := cfg.checkOneLeader()
 
 	total1 := rpcs()
 
@@ -527,7 +530,7 @@ loop:
 			time.Sleep(3 * time.Second)
 		}
 
-		leader = cfg.checkOneLeader()
+		leader, _ = cfg.checkOneLeader()
 		total1 = rpcs()
 
 		iters := 10
@@ -626,14 +629,14 @@ func TestPersist12C(t *testing.T) {
 
 	cfg.one(12, servers, true)
 
-	leader1 := cfg.checkOneLeader()
+	leader1, _ := cfg.checkOneLeader()
 	cfg.disconnect(leader1)
 	cfg.start1(leader1, cfg.applier)
 	cfg.connect(leader1)
 
 	cfg.one(13, servers, true)
 
-	leader2 := cfg.checkOneLeader()
+	leader2, _ := cfg.checkOneLeader()
 	cfg.disconnect(leader2)
 	cfg.one(14, servers-1, true)
 	cfg.start1(leader2, cfg.applier)
@@ -641,7 +644,8 @@ func TestPersist12C(t *testing.T) {
 
 	cfg.wait(4, servers, -1) // wait for leader2 to join before killing i3
 
-	i3 := (cfg.checkOneLeader() + 1) % servers
+	l3, _ := cfg.checkOneLeader()
+	i3 := (l3 + 1) % servers
 	cfg.disconnect(i3)
 	cfg.one(15, servers-1, true)
 	cfg.start1(i3, cfg.applier)
@@ -664,7 +668,7 @@ func TestPersist22C(t *testing.T) {
 		cfg.one(10+index, servers, true)
 		index++
 
-		leader1 := cfg.checkOneLeader()
+		leader1, _ := cfg.checkOneLeader()
 
 		cfg.disconnect((leader1 + 1) % servers)
 		cfg.disconnect((leader1 + 2) % servers)
@@ -707,7 +711,7 @@ func TestPersist32C(t *testing.T) {
 
 	cfg.one(101, 3, true)
 
-	leader := cfg.checkOneLeader()
+	leader, _ := cfg.checkOneLeader()
 	cfg.disconnect((leader + 2) % servers)
 
 	cfg.one(102, 2, true)
@@ -1042,7 +1046,7 @@ func snapcommon(t *testing.T, name string, disconnect bool, reliable bool, crash
 	cfg.begin(name)
 
 	cfg.one(rand.Int(), servers, true)
-	leader1 := cfg.checkOneLeader()
+	leader1, _ := cfg.checkOneLeader()
 
 	for i := 0; i < iters; i++ {
 		victim := (leader1 + 1) % servers
@@ -1075,13 +1079,13 @@ func snapcommon(t *testing.T, name string, disconnect bool, reliable bool, crash
 			// needs to rceive a snapshot to catch up.
 			cfg.connect(victim)
 			cfg.one(rand.Int(), servers, true)
-			leader1 = cfg.checkOneLeader()
+			leader1, _ = cfg.checkOneLeader()
 		}
 		if crash {
 			cfg.start1(victim, cfg.applierSnap)
 			cfg.connect(victim)
 			cfg.one(rand.Int(), servers, true)
-			leader1 = cfg.checkOneLeader()
+			leader1, _ = cfg.checkOneLeader()
 		}
 	}
 	cfg.end()
