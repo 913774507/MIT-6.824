@@ -84,7 +84,7 @@ func TestReElection2A(t *testing.T) {
 	t.Log("82 ok")
 
 	// if a quorum arises, it should elect a leader.
-	t.Logf("86 reconnect:%v", (leader2 + 1) % servers)
+	t.Logf("86 reconnect:%v", (leader2+1)%servers)
 	cfg.connect((leader2 + 1) % servers)
 	cfg.checkOneLeader()
 	t.Log("89 ok")
@@ -156,7 +156,6 @@ func TestBasicAgree2B(t *testing.T) {
 		if nd > 0 {
 			t.Fatalf("some have committed before Start()")
 		}
-
 		t.Logf("commit %v start", index*100)
 		xindex := cfg.one(index*100, servers, false)
 		t.Logf("commit %v done", index*100)
@@ -210,28 +209,35 @@ func TestFailAgree2B(t *testing.T) {
 
 	cfg.begin("Test (2B): agreement despite follower disconnection")
 
+	t.Logf("213 one 101")
 	cfg.one(101, servers, false)
-
 	// disconnect one follower from the network.
 	leader, _ := cfg.checkOneLeader()
+	t.Logf("216 check one leader")
 	cfg.disconnect((leader + 1) % servers)
+	t.Logf("disconnect S%v", (leader+1)%servers)
 
 	// the leader and remaining follower should be
 	// able to agree despite the disconnected follower.
+	t.Logf("222")
 	cfg.one(102, servers-1, false)
 	cfg.one(103, servers-1, false)
 	time.Sleep(RaftElectionTimeout)
+	t.Logf("226")
 	cfg.one(104, servers-1, false)
 	cfg.one(105, servers-1, false)
 
 	// re-connect
+	t.Logf("reconnect S%v", (leader+1)%servers)
 	cfg.connect((leader + 1) % servers)
 
 	// the full set of servers should preserve
 	// previous agreements, and be able to agree
 	// on new commands.
+	t.Logf("237")
 	cfg.one(106, servers, true)
 	time.Sleep(RaftElectionTimeout)
+	t.Logf("240")
 	cfg.one(107, servers, true)
 
 	cfg.end()
@@ -330,14 +336,14 @@ loop:
 
 		wg.Wait()
 		close(is)
-
+		DPrintf("339")
 		for j := 0; j < servers; j++ {
 			if t, _ := cfg.rafts[j].GetState(); t != term {
 				// term changed -- can't expect low RPC counts
 				continue loop
 			}
 		}
-
+		DPrintf("346")
 		failed := false
 		cmds := []int{}
 		for index := range is {
@@ -355,7 +361,7 @@ loop:
 				t.Fatalf("value %v is not an int", cmd)
 			}
 		}
-
+		DPrintf("364")
 		if failed {
 			// avoid leaking goroutines
 			go func() {
@@ -364,7 +370,7 @@ loop:
 			}()
 			continue
 		}
-
+		DPrintf("373")
 		for ii := 0; ii < iters; ii++ {
 			x := 100 + ii
 			ok := false
@@ -377,7 +383,7 @@ loop:
 				t.Fatalf("cmd %v missing in %v", x, cmds)
 			}
 		}
-
+		DPrintf("386")
 		success = true
 		break
 	}
@@ -395,33 +401,41 @@ func TestRejoin2B(t *testing.T) {
 	defer cfg.cleanup()
 
 	cfg.begin("Test (2B): rejoin of partitioned leader")
-
+	t.Logf("404")
 	cfg.one(101, servers, true)
 
 	// leader network failure
 	leader1, _ := cfg.checkOneLeader()
+	t.Logf("disconnect S%v", leader1)
 	cfg.disconnect(leader1)
 
 	// make old leader try to agree on some entries
+	t.Logf("413")
 	cfg.rafts[leader1].Start(102)
 	cfg.rafts[leader1].Start(103)
 	cfg.rafts[leader1].Start(104)
 
 	// new leader commits, also for index=2
+	t.Logf("419")
 	cfg.one(103, 2, true)
 
 	// new leader network failure
 	leader2, _ := cfg.checkOneLeader()
+	t.Logf("disconnect S%v", leader2)
 	cfg.disconnect(leader2)
 
 	// old leader connected again
+	t.Logf("reconnect S%v", leader1)
 	cfg.connect(leader1)
 
+	t.Logf("431")
 	cfg.one(104, 2, true)
 
 	// all together now
+	t.Logf("reconnect S%v", leader2)
 	cfg.connect(leader2)
 
+	t.Logf("438")
 	cfg.one(105, servers, true)
 
 	cfg.end()
